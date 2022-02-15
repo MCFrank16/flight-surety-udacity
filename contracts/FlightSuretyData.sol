@@ -21,7 +21,7 @@ contract FlightSuretyData {
     mapping(address => bool) private participatingAirlines; // a list of participants in airline voting
     mapping(address => uint256) private fundings; // a list of airlines funding, this will aid in knowing voting participants
 
-    mapping(address => mapping(bytes => uint256)) private passengerInsurances;
+    mapping(address => mapping(bytes32 => uint256)) private passengerInsurances;
     mapping(address => uint256) private passengerAccount;
 
     /********************************************************************************************/
@@ -82,9 +82,20 @@ contract FlightSuretyData {
     }
 
     /**
+     * @dev Modifier that check the "caller contract" to be authorized
+     */
+    modifier requireIsAuthorized() {
+        require(
+            authorizedCallerContracts[msg.sender] == true,
+            "Caller is not authorized"
+        );
+        _;
+    }
+
+    /**
      * @dev Modifier that requires the "airline" to be a participant
      */
-    modifier requireIsAirlineParticipating() {
+    modifier onlyParticipatingAirline() {
         require(
             participatingAirlines[msg.sender] == true,
             "Airline is not a voting participant"
@@ -95,21 +106,10 @@ contract FlightSuretyData {
     /**
      * @dev Modifier that check the "airline" to not be a participant
      */
-    modifier requireIsAirlineNotParticipating() {
+    modifier onlyNonParticipatingAirline() {
         require(
             participatingAirlines[msg.sender] == false,
             "Airline is a voting participant"
-        );
-        _;
-    }
-
-    /**
-     * @dev Modifier that check the "caller contract" to be authorized
-     */
-    modifier requireIsAuthorized() {
-        require(
-            authorizedCallerContracts[msg.sender] == true,
-            "Caller is not authorized"
         );
         _;
     }
@@ -132,8 +132,41 @@ contract FlightSuretyData {
      *
      * When operational mode is disabled, all write transactions except for this one will fail
      */
-    function setOperatingStatus(bool mode) external requireContractOwner {
+    function setOperatingStatus(bool mode) external {
         operational = mode;
+    }
+
+    /**
+     * @dev authorized caller contract
+     *
+     */
+    function authorizeCaller(address contactAddress)
+        external
+        requireContractOwner
+    {
+        authorizedCallerContracts[contactAddress] = true;
+    }
+
+    /**
+     * @dev remove authorized caller contract FlightSuretyApp
+     */
+    function removeAuthorizedCaller(address contractAddress)
+        external
+        requireContractOwner
+    {
+        delete authorizedCallerContracts[contractAddress];
+    }
+
+    /**
+     * @dev check if caller is Authorized
+     */
+    function isCallerAuthorized(address contractAddress)
+        public
+        view
+        requireContractOwner
+        returns (bool)
+    {
+        return authorizedCallerContracts[contractAddress];
     }
 
     /********************************************************************************************/
@@ -156,23 +189,19 @@ contract FlightSuretyData {
     }
 
     /**
+     * @dev check if an airline is registered
+     *
+     */
+    function isAirlineRegistered(address _airline) public view returns (bool) {
+        return registeredAirlines[_airline];
+    }
+
+    /**
      * @dev get a number of registered airlines
      *
      */
     function getRegisteredAirlinesNumber() external view returns (uint256) {
         return registeredAirlinesNumber;
-    }
-
-    /**
-     * @dev check if an airline is registered
-     *
-     */
-    function isAirlineRegistered(address _airline)
-        external
-        view
-        returns (bool)
-    {
-        return registeredAirlines[_airline];
     }
 
     /**
@@ -192,15 +221,29 @@ contract FlightSuretyData {
     }
 
     /**
+     *  @dev get passenger insurance
+     * check if the passenger has bought a flight insurance
+     */
+    function getInsurance(
+        address passenger,
+        address airline,
+        string calldata flight,
+        uint256 timestamp
+    ) external view returns (uint256) {
+        bytes32 flightKey = getFlightKey(airline, flight, timestamp);
+        return passengerInsurances[passenger][flightKey];
+    }
+
+    /**
      *  @dev Credits payouts to insurees
      */
     function creditInsurees(
-        address _airline,
         address passenger,
+        address airline,
         string calldata flight,
         uint256 timestamp,
         uint256 credit
-    ) external pure requireIsOperational requireIsAuthorized {
+    ) external requireIsOperational requireIsAuthorized {
         bytes32 flightKey = getFlightKey(airline, flight, timestamp);
         delete passengerInsurances[passenger][flightKey];
         passengerAccount[passenger] = passengerAccount[passenger].add(credit);
@@ -208,7 +251,7 @@ contract FlightSuretyData {
 
     /**
      *  @dev Transfers eligible payout funds to insuree
-     *
+     * this will be triggered when the passengers choose to withdraw the cash
      */
     function pay(address payable passenger)
         external
@@ -222,27 +265,15 @@ contract FlightSuretyData {
     }
 
     /**
-     *  @dev get passenger premium insurance
-     *
-     */
-    function getPremium(
-        address passenger,
-        address airline,
-        string calldata fligth,
-        uint256 timestamp
-    ) external view returns (uint256) {
-        bytes32 flightKey = getFlightKey(airline, flight, timestamp);
-        return passengerInsurances[passenger][flightKey];
-    }
-
-    /**
-     *  @dev get passenger credit
+     *  @dev get passenger credit in their account
      *
      */
     function getBalance(address passenger)
         external
+        view
         requireIsOperational
         requireIsAuthorized
+        returns (uint256)
     {
         uint256 credit = passengerAccount[passenger];
         return credit;
@@ -258,15 +289,18 @@ contract FlightSuretyData {
         payable
         requireIsOperational
         requireIsAirlineRegistered
-        requireIsAirlineNotParticipating
+        onlyNonParticipatingAirline
     {
         // check the current funding
         uint256 currentFunds = fundings[msg.sender];
         currentFunds = currentFunds.add(msg.value);
         fundings[msg.sender] = currentFunds;
 
-        if (participatingAirlines[msg.sender] == false && currentFunds >= 10) {
-            participatingAirlines[msg.sender] == true;
+        if (
+            currentFunds >= 10 ether &&
+            participatingAirlines[msg.sender] == false
+        ) {
+            participatingAirlines[msg.sender] = true;
             participants++;
             emit Participating(msg.sender);
         }
@@ -281,18 +315,14 @@ contract FlightSuretyData {
         view
         returns (bool)
     {
-        return participatingAirlines[_airlines];
+        return participatingAirlines[_airline];
     }
 
     /**
      *  @dev retrieve the number of participants
      *
      */
-    function getTheParticipantsNumber(address _airline)
-        external
-        view
-        returns (uint256)
-    {
+    function getTheParticipantsNumber() external view returns (uint256) {
         return participants;
     }
 
@@ -308,6 +338,10 @@ contract FlightSuretyData {
      * @dev Fallback function for funding smart contract.
      *
      */
+    fallback() external payable {
+        fund();
+    }
+
     receive() external payable {
         fund();
     }
