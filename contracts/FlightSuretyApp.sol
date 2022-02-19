@@ -204,6 +204,7 @@ contract FlightSuretyApp {
     function registerFlight(string calldata flightCode, uint256 timestamp)
         external
         requireIsOperational
+        onlyParticipatingAirline
     {
         bytes32 flightKey = getFlightKey(msg.sender, flightCode, timestamp);
         require(

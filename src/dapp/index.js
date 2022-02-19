@@ -12,7 +12,6 @@ import './flightsurety.css';
 
         // Read transaction
         contract.isOperational((error, result) => {
-            console.log(error,result);
             display('Operational Status', 'Check if contract is operational', [ { label: 'Operational Status', error: error, value: result} ]);
         });
     
@@ -23,6 +22,22 @@ import './flightsurety.css';
             // Write transaction
             contract.fetchFlightStatus(flight, (error, result) => {
                 display('Oracles', 'Trigger oracles', [ { label: 'Fetch Flight Status', error: error, value: result.flight + ' ' + result.timestamp} ]);
+            });
+        })
+
+        DOM.elid('buy').addEventListener('click', () => {
+            let flightSelection = document.getElementById("flight-number");
+            let flight = flightSelection.options[flightSelection.selectedIndex].value;
+            let insuranceValue = DOM.elid('value').value;
+            console.log(flight, insuranceValue)
+            contract.buyInsurance(flight, insuranceValue, (error, result) => {
+                display('Passenger', 'Buy insurance', [ { label: 'Transaction', error: error, value: result} ]);
+            });
+        })
+
+        DOM.elid('pay').addEventListener('click', () => {
+            contract.withdrawCredits((error, result) => {
+                display('Passenger', 'Withdraw credits', [ { label: 'Transaction', error: error, value: result} ]);
             });
         })
     
